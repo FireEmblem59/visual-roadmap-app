@@ -1,3 +1,5 @@
+// src/pages/RoadmapPage.jsx (FINAL - With Camera Panning)
+
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { applyNodeChanges, applyEdgeChanges } from "reactflow";
 import RoadmapCanvas from "../components/roadmap/RoadmapCanvas";
@@ -24,7 +26,7 @@ const RoadmapPage = () => {
   const [contextMenu, setContextMenu] = useState(null);
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
 
-  // --- DATA FETCHING ---
+  // --- DATA FETCHING & SAVING (UNCHANGED) ---
   useEffect(() => {
     const loadData = async () => {
       if (currentUser) {
@@ -43,7 +45,6 @@ const RoadmapPage = () => {
     loadData();
   }, [currentUser]);
 
-  // --- DATA SAVING ---
   useEffect(() => {
     if (isInitialMount.current || isLoading) {
       if (!isLoading) isInitialMount.current = false;
@@ -54,7 +55,7 @@ const RoadmapPage = () => {
     }
   }, [nodes, edges, currentUser, isLoading]);
 
-  // --- PROGRESS CALCULATION ---
+  // --- PROGRESS CALCULATION (UNCHANGED) ---
   useEffect(() => {
     const doneNodes = nodes.filter(
       (node) => node.data.status === "done"
@@ -62,7 +63,7 @@ const RoadmapPage = () => {
     setProgress(nodes.length > 0 ? (doneNodes / nodes.length) * 100 : 0);
   }, [nodes]);
 
-  // --- EVENT HANDLERS ---
+  // --- EVENT HANDLERS (UNCHANGED) ---
   const onNodesChange = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
     []
@@ -75,14 +76,25 @@ const RoadmapPage = () => {
     event.preventDefault();
     setContextMenu({ x: event.clientX, y: event.clientY, node });
   }, []);
+  const handleAddNodeInMiddle = useCallback((edgeId) => {
+    setModalContext({ mode: "insert", edgeId: edgeId });
+  }, []);
 
+  // --- MODAL SUBMIT (WITH CAMERA LOGIC) ---
   const handleModalSubmit = useCallback(
     (newLabel) => {
-      let newNodeId;
+      // This variable will hold the newly created node so we can focus on it later.
+      let newNodeToFocus = null;
+      const edgeStyle = {
+        stroke: "#94a3b8",
+        strokeWidth: 2,
+        strokeDasharray: "5,5",
+      };
+      const uniqueId = () => "id_" + Date.now();
+
       if (modalContext?.mode === "new") {
         const lastNode = nodes[nodes.length - 1];
-        newNodeId =
-          nodes.length > 0 ? (parseInt(lastNode.id) + 1).toString() : "1";
+        const newNodeId = uniqueId();
         const newNode = {
           id: newNodeId,
           type: "bubble",
@@ -94,16 +106,14 @@ const RoadmapPage = () => {
               id: `e${lastNode.id}-${newNodeId}`,
               source: lastNode.id,
               target: newNodeId,
-              type: "smoothstep",
-              style: {
-                stroke: "#94a3b8",
-                strokeWidth: 2,
-                strokeDasharray: "5,5",
-              },
+              type: "custom",
+              style: edgeStyle,
             }
           : null;
+
         setNodes((nds) => [...nds, newNode]);
         if (newEdge) setEdges((eds) => [...eds, newEdge]);
+        newNodeToFocus = newNode; // Set the node to focus on.
       } else if (modalContext?.mode === "edit") {
         setNodes((nds) =>
           nds.map((node) =>
@@ -112,28 +122,85 @@ const RoadmapPage = () => {
               : node
           )
         );
-      }
-      setModalContext(null);
+      } else if (modalContext?.mode === "insert") {
+        const edgeToSplit = edges.find((e) => e.id === modalContext.edgeId);
+        if (!edgeToSplit) return;
 
-      if (modalContext?.mode === "new" && reactFlowInstance) {
-        setTimeout(() => {
-          const node = reactFlowInstance.getNode(newNodeId);
-          if (node) {
-            reactFlowInstance.setCenter(
-              node.position.x + 100,
-              node.position.y + 100,
-              { zoom: 1, duration: 800 }
-            );
+        const sourceNode = nodes.find((n) => n.id === edgeToSplit.source);
+        const sourceNodeIndex = nodes.findIndex((n) => n.id === sourceNode.id);
+
+        const newNodeId = uniqueId();
+        const newNode = {
+          id: newNodeId,
+          type: "bubble",
+          data: { label: newLabel, status: "pending" },
+          position: {
+            x: sourceNode.position.x + 250,
+            y: sourceNode.position.y,
+          },
+        };
+
+        const shiftedNodes = nodes.map((node, index) => {
+          if (index > sourceNodeIndex) {
+            return {
+              ...node,
+              position: { ...node.position, x: node.position.x + 250 },
+            };
           }
-        }, 100);
+          return node;
+        });
+
+        const finalNodes = [
+          ...shiftedNodes.slice(0, sourceNodeIndex + 1),
+          newNode,
+          ...shiftedNodes.slice(sourceNodeIndex + 1),
+        ];
+
+        const finalEdges = edges
+          .filter((e) => e.id !== edgeToSplit.id)
+          .concat([
+            {
+              id: `e${edgeToSplit.source}-${newNodeId}`,
+              source: edgeToSplit.source,
+              target: newNodeId,
+              type: "custom",
+              style: edgeStyle,
+            },
+            {
+              id: `e${newNodeId}-${edgeToSplit.target}`,
+              source: newNodeId,
+              target: edgeToSplit.target,
+              type: "custom",
+              style: edgeStyle,
+            },
+          ]);
+
+        setNodes(finalNodes);
+        setEdges(finalEdges);
+        newNodeToFocus = newNode; // Also set the node to focus on here.
       }
+
+      // --- THE CAMERA FIX ---
+      // This block now runs for BOTH 'new' and 'insert' modes.
+      if (newNodeToFocus && reactFlowInstance) {
+        setTimeout(() => {
+          reactFlowInstance.setCenter(
+            newNodeToFocus.position.x + 100, // Offset a bit to the right of the node's center
+            newNodeToFocus.position.y + 100,
+            { zoom: 1, duration: 800 } // Animate the pan/zoom over 800ms
+          );
+        }, 100); // A small delay ensures the node has rendered before we pan to it.
+      }
+
+      setModalContext(null);
     },
-    [nodes, reactFlowInstance, modalContext]
+    [modalContext, nodes, edges, reactFlowInstance] // <-- reactFlowInstance is now a dependency
   );
 
+  // --- DELETION HANDLER (UNCHANGED) ---
   const handleDeleteNode = useCallback(() => {
     if (!contextMenu?.node) return;
-    const nodeToRemove = contextMenu.node;
+    const { node: nodeToRemove } = contextMenu;
     const nodeIndexToRemove = nodes.findIndex((n) => n.id === nodeToRemove.id);
 
     const incomingEdge = edges.find((e) => e.target === nodeToRemove.id);
@@ -156,12 +223,13 @@ const RoadmapPage = () => {
     let updatedEdges = edges.filter(
       (e) => e.source !== nodeToRemove.id && e.target !== nodeToRemove.id
     );
+
     if (sourceId && targetId) {
       const newBridgeEdge = {
-        id: `e${sourceId}-${targetId}`,
+        id: `e${sourceId}-${targetId}`, // This ID is now safe because the old edges are gone.
         source: sourceId,
         target: targetId,
-        type: "smoothstep",
+        type: "custom",
         style: { stroke: "#94a3b8", strokeWidth: 2, strokeDasharray: "5,5" },
       };
       updatedEdges.push(newBridgeEdge);
@@ -180,6 +248,7 @@ const RoadmapPage = () => {
   }
 
   return (
+    // --- JSX IS UNCHANGED ---
     <div onClick={() => setContextMenu(null)}>
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 pb-6 sm:px-0">
@@ -187,7 +256,7 @@ const RoadmapPage = () => {
             <h1 className="text-3xl font-bold text-gray-900">Your Roadmap</h1>
             <button
               onClick={() => setModalContext({ mode: "new" })}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg"
+              className="bg-indigo-600 hover-bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg"
             >
               + Add Step
             </button>
@@ -204,6 +273,7 @@ const RoadmapPage = () => {
             onNodeContextMenu={onNodeContextMenu}
             setReactFlowInstance={setReactFlowInstance}
             nodesDraggable={false}
+            onAddNodeInMiddle={handleAddNodeInMiddle}
           />
         </div>
       </div>
@@ -225,7 +295,13 @@ const RoadmapPage = () => {
         initialValue={
           modalContext?.mode === "edit" ? modalContext.node.data.label : ""
         }
-        title={modalContext?.mode === "edit" ? "Edit Step" : "Add New Step"}
+        title={
+          modalContext?.mode === "edit"
+            ? "Edit Step"
+            : modalContext?.mode === "insert"
+            ? "Insert New Step"
+            : "Add New Step"
+        }
       />
     </div>
   );

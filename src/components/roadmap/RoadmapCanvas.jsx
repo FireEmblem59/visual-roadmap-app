@@ -1,8 +1,9 @@
 // src/components/roadmap/RoadmapCanvas.jsx
 
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import ReactFlow, { Controls, Background, ReactFlowProvider } from "reactflow";
 import BubbleNode from "./BubbleNode";
+import CustomEdge from "./CustomEdge";
 
 const nodeTypes = { bubble: BubbleNode };
 
@@ -15,6 +16,7 @@ const RoadmapCanvas = ({
   onNodeContextMenu,
   setReactFlowInstance,
   nodesDraggable,
+  onAddNodeInMiddle,
 }) => {
   const onNodeClick = useCallback(
     (event, clickedNode) => {
@@ -52,12 +54,28 @@ const RoadmapCanvas = ({
     [setNodes]
   );
 
+  const edgeTypes = useMemo(
+    () => ({
+      custom: CustomEdge,
+    }),
+    []
+  );
+  const edgesWithData = edges.map((edge) => ({
+    ...edge,
+    type: "custom",
+    data: {
+      ...edge.data,
+      onAddNode: onAddNodeInMiddle,
+    },
+  }));
+
   return (
     <div style={{ height: "75vh", width: "100%" }}>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesWithData}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
