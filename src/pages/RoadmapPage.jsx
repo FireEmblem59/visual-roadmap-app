@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { applyNodeChanges, applyEdgeChanges } from "reactflow";
+import { useParams, Link } from "react-router-dom";
 import RoadmapCanvas from "../components/roadmap/RoadmapCanvas";
 import ProgressBar from "../components/core/ProgressBar";
 import EditModal from "../components/core/EditModal";
@@ -11,14 +12,16 @@ import {
   initialEdges,
 } from "../components/roadmap/initial-elements";
 import { useAuth } from "../features/auth/AuthProvider";
-import { saveRoadmap, getRoadmap } from "../api/firebase/firestore";
+import { updateRoadmap, getRoadmapById } from "../api/firebase/firestore";
 
 const RoadmapPage = () => {
   const { currentUser } = useAuth();
+  const { roadmapId } = useParams();
   const isInitialMount = useRef(true);
 
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
+  const [roadmapTitle, setRoadmapTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
   const [progress, setProgress] = useState(0);
@@ -26,34 +29,34 @@ const RoadmapPage = () => {
   const [contextMenu, setContextMenu] = useState(null);
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
 
-  // --- DATA FETCHING & SAVING (UNCHANGED) ---
+  // --- DATA FETCHING & SAVING
   useEffect(() => {
     const loadData = async () => {
-      if (currentUser) {
+      if (currentUser && roadmapId) {
         setIsLoading(true);
-        const savedRoadmap = await getRoadmap(currentUser.uid);
-        if (savedRoadmap && savedRoadmap.nodes?.length > 0) {
-          setNodes(savedRoadmap.nodes);
+        const savedRoadmap = await getRoadmapById(currentUser.uid, roadmapId);
+        if (savedRoadmap) {
+          setNodes(savedRoadmap.nodes || []);
           setEdges(savedRoadmap.edges || []);
-        } else {
-          setNodes(initialNodes);
-          setEdges(initialEdges);
+          setRoadmapTitle(savedRoadmap.title || "My Roadmap");
         }
         setIsLoading(false);
       }
     };
     loadData();
-  }, [currentUser]);
+  }, [currentUser, roadmapId]);
 
+  // ---  DATA SAVING ---
   useEffect(() => {
     if (isInitialMount.current || isLoading) {
       if (!isLoading) isInitialMount.current = false;
       return;
     }
-    if (currentUser) {
-      saveRoadmap(currentUser.uid, { nodes, edges });
+    if (currentUser && roadmapId) {
+      // Use the new update function
+      updateRoadmap(currentUser.uid, roadmapId, { nodes, edges });
     }
-  }, [nodes, edges, currentUser, isLoading]);
+  }, [nodes, edges, currentUser, roadmapId, isLoading]);
 
   // --- PROGRESS CALCULATION (UNCHANGED) ---
   useEffect(() => {
